@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm + GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - name: Validate tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          bun -e '
+            const tag = process.env.TAG_NAME ?? "";
+            if (!tag.startsWith("v")) {
+              throw new Error(`Expected tag to start with "v", got: ${tag}`);
+            }
+            const tagVersion = tag.slice(1);
+            const pkg = await Bun.file("package.json").json();
+            const pkgVersion = pkg.version;
+            if (typeof pkgVersion !== "string" || pkgVersion.length === 0) {
+              throw new Error("package.json missing valid \"version\"");
+            }
+            if (tagVersion !== pkgVersion) {
+              throw new Error(`Tag version (${tagVersion}) does not match package.json version (${pkgVersion})`);
+            }
+            console.log(`OK: tag ${tag} matches package.json version ${pkgVersion}`);
+          '
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build (dist + types)
+        run: bun run build
+
+      - name: Verify package tarball contents (bun pm pack --dry-run)
+        # Validates the published file set without requiring npm auth.
+        run: bun pm pack --dry-run --ignore-scripts
+
+      - name: Configure npm auth (token)
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "Missing secrets.NPM_TOKEN (npm publish token)." >&2
+            exit 1
+          fi
+          NPMRC_PATH="${RUNNER_TEMP}/.npmrc"
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "${NPMRC_PATH}"
+          echo "NPM_CONFIG_USERCONFIG=${NPMRC_PATH}" >> "${GITHUB_ENV}"
+          # Bun uses BUN_AUTH_TOKEN in some contexts; set both.
+          echo "BUN_AUTH_TOKEN=${NPM_TOKEN}" >> "${GITHUB_ENV}"
+          echo "NODE_AUTH_TOKEN=${NPM_TOKEN}" >> "${GITHUB_ENV}"
+
+      - name: Verify npm authentication
+        run: bun pm whoami
+
+      - name: Publish to npm
+        run: |
+          # Prefer Bun-native publishing. If Bun has a transient auth issue on CI,
+          # fall back to npm CLI to keep releases unblocked.
+          bun publish --ignore-scripts --no-save || bunx npm publish --ignore-scripts
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" --generate-notes
+

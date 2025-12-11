@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build-pack:
+    name: Test, build, and pack (dry-run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build (dist + types)
+        run: bun run build
+
+      - name: Verify package tarball contents (bun pm pack --dry-run)
+        # This validates the published file set without requiring npm auth.
+        # We skip lifecycle scripts because CI already ran test/build.
+        run: bun pm pack --dry-run --ignore-scripts
+
