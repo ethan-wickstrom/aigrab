@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/ethan-wickstrom/grabr/compare/v1.0.0...v1.1.0) (2025-12-12)
+
+
+### Features
+
+* add client entrypoint for React integration and update documentation for usage ([91ce500](https://github.com/ethan-wickstrom/grabr/commit/91ce5007a49783565842366d0a62af0a21f343e3))
+
 ## 1.0.0 (2025-12-12)
 
 
