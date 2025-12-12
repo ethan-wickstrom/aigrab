@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { truncateText, buildPreferredSelector, toSerializableValue } from "../src/aigrab";
-import type { ElementContextV2, AiGrabSession } from "../src/aigrab";
-import { renderElementContextPrompt, renderSessionPrompt } from "../src/aigrab";
-
-// -----------------------------------------------------------------------------
-// Tests (bun test)
-// -----------------------------------------------------------------------------
+import { truncateText, buildPreferredSelector, toSerializableValue } from "../src/grabr";
+import type { ElementContextV2, GrabrSession } from "../src/grabr";
+import { renderElementContextPrompt, renderSessionPrompt } from "../src/grabr";
 
 describe("DOM selector helpers", () => {
     test("truncateText", () => {
@@ -16,9 +12,6 @@ describe("DOM selector helpers", () => {
     });
   
     test("buildAncestorSelectorPath basic", () => {
-      // Minimal fake DOM structure is not available here, so we just test
-      // string composition logic indirectly via known behavior.
-      // This test is intentionally simple as a sanity check.
       expect(typeof buildPreferredSelector).toBe("function");
     });
   });
@@ -258,7 +251,7 @@ describe("DOM selector helpers", () => {
         },
       };
 
-      const session: AiGrabSession = {
+      const session: GrabrSession = {
         id: "session-1",
         createdAt: "2025-01-01T00:00:00.000Z",
         url: "http://localhost:3000",

@@ -1,5 +1,5 @@
 {
-  "name": "aigrab",
+  "name": "grabr",
   "version": "1.0.0",
   "author": "Ethan Wickstrom",
   "description": "React element context extraction for AI coding agents.",
@@ -15,10 +15,10 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./aigrab": {
-      "types": "./dist/aigrab.d.ts",
-      "import": "./dist/aigrab.js",
-      "default": "./dist/aigrab.js"
+    "./grabr": {
+      "types": "./dist/grabr.d.ts",
+      "import": "./dist/grabr.js",
+      "default": "./dist/grabr.js"
     }
   },
   "files": [
@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "clean": "bun run ./scripts/clean.ts",
-    "build:js": "bun build --target=bun --format=esm --outdir=dist --packages=external --sourcemap=external ./src/index.ts ./src/aigrab.ts",
+    "build:js": "bun build --target=bun --format=esm --outdir=dist --packages=external --sourcemap=external ./src/index.ts ./src/grabr.ts",
     "build:types": "bunx tsc -p tsconfig.build.json",
     "build": "bun run clean && bun run build:js && bun run build:types",
     "verify": "bun run ./scripts/verify.ts",

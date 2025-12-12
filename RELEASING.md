@@ -1,4 +1,4 @@
-# Releasing `aigrab`
+# Releasing `grabr`
 
 This repo uses a low‑effort, high‑automation, Bun‑first release system.
 
@@ -14,7 +14,7 @@ This repo uses a low‑effort, high‑automation, Bun‑first release system.
 Add these repository secrets:
 
 1. `NPM_TOKEN`
-   - npm publish token with access to the `aigrab` package.
+   - npm publish token with access to the `grabr` package.
    - Used by `.github/workflows/release.yml`.
 
 2. `RELEASE_PLEASE_TOKEN`

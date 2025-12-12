@@ -1,30 +1,30 @@
-# aigrab
+# grabr
 
 React element context extraction for AI coding agents.
 
 ## Install
 
 ```bash
-bun add aigrab
+bun add grabr
 ```
 
 ## Usage (browser app)
 
-`aigrab` can extract DOM + (optionally) React component context for a clicked element.
+`grabr` can extract DOM + (optionally) React component context for a clicked element.
 
 **Important:** install the React DevTools hook via `bippy` *before React runs*.
 
 ```ts
 import "bippy"; // installs DevTools hook before React
-import { initAiGrab } from "aigrab";
+import { initGrabr } from "grabr";
 
-initAiGrab(); // attaches overlay + sets window.aiGrab
+initGrabr(); // attaches overlay + sets window.grabr
 ```
 
 Then start a selection session from the console:
 
 ```js
-window.aiGrab?.startSelectionSession("Update the button styles.");
+window.grabr?.startSelectionSession("Update the button styles.");
 ```
 
 ## Local dev

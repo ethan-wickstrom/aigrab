@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "aigrab",
+      "name": "grabr",
       "dependencies": {
         "bippy": "^0.5.25",
       },

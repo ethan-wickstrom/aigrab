@@ -4,7 +4,6 @@
  * Run locally:
  *   bun run demo
  */
-import { startAiGrabDemoServer } from "../src/aigrab";
+import { startGrabrDemoServer } from "../src/grabr";
 
-await startAiGrabDemoServer();
-
+await startGrabrDemoServer();

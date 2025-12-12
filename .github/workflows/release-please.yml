@@ -33,4 +33,4 @@ jobs:
           # Create a fine‑grained PAT with Contents + Pull Requests write.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           release-type: node
-          package-name: aigrab
+          package-name: grabr

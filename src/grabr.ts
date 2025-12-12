@@ -1,21 +1,10 @@
 /// <reference lib="dom" />
 
 /**
- * aigrab: React element context extraction for AI coding agents.
+ * grabr: React element context extraction for AI coding agents.
  *
- * IMPORTANT (React/Bippy ordering)
- * --------------------------------
- * You MUST install the React DevTools hook (via bippy) before React runs:
- *
- *   // Vite example (main.tsx):
- *   import "bippy"; // installs hook BEFORE React
- *   import { initAiGrab } from "./aigrab";
- *   initAiGrab();   // attaches overlay and window.aiGrab
- *   import React from "react";
- *   import ReactDOM from "react-dom/client";
- *
- * If the hook is not active, React metadata in ElementContextV2 will be absent and
- * `reactDebug.inspectorStatus` will describe why. DOM/styling context still works.
+ * Import "bippy" before React runs to enable React metadata. If the hook isn't
+ * active, React info will be missing but DOM/styling still works.
  */
 
 // -----------------------------------------------------------------------------
@@ -48,7 +37,7 @@ import { getSource } from "bippy/source";
 
 declare global {
   interface Window {
-    aiGrab?: AiGrabApi;
+    grabr?: GrabrApi;
   }
 }
 
@@ -353,7 +342,7 @@ export interface ElementContextV2 {
 }
 
 // Session & agent integration
-export interface AiGrabSession {
+export interface GrabrSession {
   readonly id: string;
   readonly createdAt: string;
   readonly url: string;
@@ -365,21 +354,21 @@ export interface AiGrabSession {
 export interface AgentProvider {
   readonly id: string;
   readonly label: string;
-  sendContext(session: AiGrabSession): Promise<void>;
-  onSuccess?(session: AiGrabSession): void;
-  onError?(session: AiGrabSession, error: Error): void;
+  sendContext(session: GrabrSession): Promise<void>;
+  onSuccess?(session: GrabrSession): void;
+  onError?(session: GrabrSession, error: Error): void;
 }
 
-export interface AiGrabApi {
+export interface GrabrApi {
   readonly version: string;
   startSelectionSession(userInstruction?: string | null): void;
-  getCurrentSession(): AiGrabSession | null;
+  getCurrentSession(): GrabrSession | null;
   registerAgentProvider(provider: AgentProvider): void;
   setActiveAgentProvider(id: string): void;
 }
 
-export interface AiGrabClient extends AiGrabApi {
-  readonly config: Readonly<AiGrabRuntimeConfig>;
+export interface GrabrClient extends GrabrApi {
+  readonly config: Readonly<GrabrRuntimeConfig>;
   dispose(): void;
 }
 
@@ -575,35 +564,35 @@ const basicDataSourceStrategy: DataSourceDetectionStrategy = {
 
 export type ReactInspectorMode = "best-effort" | "required" | "off";
 
-export interface AiGrabHeuristics {
+export interface GrabrHeuristics {
   readonly frameworkStrategies: readonly FrameworkDetectionStrategy[];
   readonly dataSourceStrategies: readonly DataSourceDetectionStrategy[];
 }
 
-export interface AiGrabRuntimeConfig {
+export interface GrabrRuntimeConfig {
   readonly reactInspectorMode: ReactInspectorMode;
   readonly maxReactStackFrames: number;
-  readonly heuristics: AiGrabHeuristics;
+  readonly heuristics: GrabrHeuristics;
 }
 
-const defaultHeuristics: AiGrabHeuristics = {
+const defaultHeuristics: GrabrHeuristics = {
   frameworkStrategies: [nextLikeFrameworkStrategy, genericFrameworkStrategy],
   dataSourceStrategies: [basicDataSourceStrategy],
 };
 
-export const defaultRuntimeConfig: AiGrabRuntimeConfig = {
+export const defaultRuntimeConfig: GrabrRuntimeConfig = {
   reactInspectorMode: "best-effort",
   maxReactStackFrames: 8,
   heuristics: defaultHeuristics,
 };
 
 export function mergeRuntimeConfig(
-  partial: Partial<AiGrabRuntimeConfig> | undefined
-): AiGrabRuntimeConfig {
+  partial: Partial<GrabrRuntimeConfig> | undefined
+): GrabrRuntimeConfig {
   if (!partial) {
     return defaultRuntimeConfig;
   }
-  const heuristics: AiGrabHeuristics = {
+  const heuristics: GrabrHeuristics = {
     frameworkStrategies:
       partial.heuristics?.frameworkStrategies ?? defaultHeuristics.frameworkStrategies,
     dataSourceStrategies:
@@ -726,10 +715,10 @@ function summarizeSiblings(el: Element): SiblingSummary {
   const total = siblings.length;
   const index = siblings.indexOf(el);
   const previous =
-    index > 0 ? summarizeDomNode(siblings[index - 1] as Element) : null;
+    index > 0 ? summarizeDomNode(siblings[index - 1]!) : null;
   const next =
     index >= 0 && index < total - 1
-      ? summarizeDomNode(siblings[index + 1] as Element)
+      ? summarizeDomNode(siblings[index + 1]!)
       : null;
   return {
     index,
@@ -750,7 +739,7 @@ function summarizeChildren(el: Element): ChildSummary {
   }
   const samples: DomNodeSummary[] = children
     .slice(0, MAX_CHILD_SAMPLES)
-    .map((c) => summarizeDomNode(c as Element));
+    .map((c) => summarizeDomNode(c));
   return {
     totalChildren: children.length,
     tagCounts,
@@ -987,7 +976,7 @@ function getReactDebugInfoForElement(element: Element): ReactDebugInfo {
 // Build ReactTreeSlice for a host DOM element (best-effort).
 async function buildReactTreeSlice(
   element: Element,
-  config: AiGrabRuntimeConfig,
+  config: GrabrRuntimeConfig,
   debugInfo: ReactDebugInfo
 ): Promise<ReactTreeSlice | null> {
   if (config.reactInspectorMode === "off") {
@@ -995,10 +984,6 @@ async function buildReactTreeSlice(
   }
 
   if (debugInfo.inspectorStatus !== "ok") {
-    if (config.reactInspectorMode === "required") {
-      // In "required" mode, we could throw or signal more strongly; here we simply
-      // return null but the debug block carries the reason.
-    }
     return null;
   }
 
@@ -1167,13 +1152,12 @@ function buildBehaviorContext(
 ): BehaviorContext {
   const handlers: EventHandlerInfo[] = [];
 
-  const hostFiber = (() => {
-    try {
-      return getFiberFromHostInstance(element);
-    } catch {
-      return null;
-    }
-  })();
+  let hostFiber: Fiber | null = null;
+  try {
+    hostFiber = getFiberFromHostInstance(element);
+  } catch {
+    hostFiber = null;
+  }
 
   const seenNames = new Set<string>();
 
@@ -1241,7 +1225,7 @@ function buildBehaviorContext(
 
 function buildAppContext(
   reactSlice: ReactTreeSlice | null,
-  config: AiGrabRuntimeConfig
+  config: GrabrRuntimeConfig
 ): AppContext {
   const url =
     typeof window !== "undefined" && typeof window.location !== "undefined"
@@ -1475,14 +1459,14 @@ function buildDomNeighborhood(el: Element): DomNeighborhood {
 // -----------------------------------------------------------------------------
 
 export interface InspectorEngine {
-  readonly config: Readonly<AiGrabRuntimeConfig>;
+  readonly config: Readonly<GrabrRuntimeConfig>;
   getElementContext(selectedElement: Element): Promise<ElementContextV2>;
 }
 
 class DefaultInspectorEngine implements InspectorEngine {
-  readonly config: Readonly<AiGrabRuntimeConfig>;
+  readonly config: Readonly<GrabrRuntimeConfig>;
 
-  constructor(config: AiGrabRuntimeConfig) {
+  constructor(config: GrabrRuntimeConfig) {
     this.config = config;
   }
 
@@ -1517,7 +1501,7 @@ class DefaultInspectorEngine implements InspectorEngine {
 let defaultInspectorEngine: InspectorEngine | null = null;
 
 export function createInspectorEngine(
-  partialConfig?: Partial<AiGrabRuntimeConfig>
+  partialConfig?: Partial<GrabrRuntimeConfig>
 ): InspectorEngine {
   const config = mergeRuntimeConfig(partialConfig);
   return new DefaultInspectorEngine(config);
@@ -1854,7 +1838,7 @@ export function renderElementContextPrompt(
   return lines.join("\n");
 }
 
-export function renderSessionPrompt(session: AiGrabSession): string {
+export function renderSessionPrompt(session: GrabrSession): string {
   const checksum = promptChecksum(stringifyForPrompt(session, false));
   const lines: string[] = [];
   lines.push(`<ai_grab_session id="${session.id}" checksum="${checksum}">`);
@@ -1895,112 +1879,106 @@ export function renderSessionPrompt(session: AiGrabSession): string {
 // Default AgentProvider: clipboard + console
 // -----------------------------------------------------------------------------
 
-/// <reference lib="dom" />
-
 export class ClipboardAgentProvider implements AgentProvider {
   readonly id: string = "clipboard";
   readonly label: string = "Clipboard (default)";
 
-  async sendContext(session: AiGrabSession): Promise<void> {
-      const text = renderSessionPrompt(session);
+  async sendContext(session: GrabrSession): Promise<void> {
+    const text = renderSessionPrompt(session);
 
-      const copyFailureReasons: string[] = [];
-      const copied = await tryCopyTextToClipboard(text, copyFailureReasons);
+    const copyFailureReasons: string[] = [];
+    const copied = await tryCopyTextToClipboard(text, copyFailureReasons);
 
-      // eslint-disable-next-line no-console
-      console.log("[aigrab] Session context:\\n", text);
+    // eslint-disable-next-line no-console
+    console.log("[grabr] Session context:\n", text);
 
-      if (!copied) {
-          const suffix =
-              copyFailureReasons.length > 0 ? ` Reasons: ${copyFailureReasons.join(" | ")}` : "";
-          throw new Error(`Failed to copy session context to clipboard.${suffix}`);
-      }
+    if (!copied) {
+      const suffix =
+        copyFailureReasons.length > 0
+          ? ` Reasons: ${copyFailureReasons.join(" | ")}`
+          : "";
+      throw new Error(`Failed to copy session context to clipboard.${suffix}`);
+    }
   }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onSuccess(_session: AiGrabSession): void {}
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onError(_session: AiGrabSession, _error: Error): void {}
 }
 
-async function tryCopyTextToClipboard(text: string, reasonsOut: string[]): Promise<boolean> {
-  if (typeof text !== "string") {
-      reasonsOut.push("Text payload was not a string.");
-      return false;
-  }
-
-  if (
-      typeof navigator !== "undefined" &&
-      typeof navigator.clipboard !== "undefined" &&
-      typeof navigator.clipboard.writeText === "function"
-  ) {
-      try {
-          await navigator.clipboard.writeText(text);
-          return true;
-      } catch (error) {
-          reasonsOut.push(
-              error instanceof Error ? `navigator.clipboard.writeText failed: ${error.message}` : "navigator.clipboard.writeText failed"
-          );
-      }
+async function tryCopyTextToClipboard(
+  text: string,
+  reasonsOut: string[]
+): Promise<boolean> {
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      reasonsOut.push(
+        error instanceof Error
+          ? `navigator.clipboard.writeText failed: ${error.message}`
+          : "navigator.clipboard.writeText failed"
+      );
+    }
   } else {
-      reasonsOut.push("navigator.clipboard.writeText not available.");
+    reasonsOut.push("navigator.clipboard.writeText not available.");
   }
 
   if (typeof document === "undefined" || !document.body) {
-      reasonsOut.push("document/body not available for execCommand fallback.");
-      return false;
+    reasonsOut.push("document/body not available for execCommand fallback.");
+    return false;
   }
 
   try {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.style.position = "fixed";
-      textarea.style.left = "-9999px";
-      textarea.style.top = "0";
-      textarea.style.opacity = "0";
-      textarea.setAttribute("readonly", "true");
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    textarea.style.opacity = "0";
+    textarea.setAttribute("readonly", "true");
 
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
 
-      const ok = document.execCommand("copy");
-      document.body.removeChild(textarea);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
 
-      if (!ok) {
-          reasonsOut.push("document.execCommand('copy') returned false.");
-      }
-      return ok;
+    if (!ok) {
+      reasonsOut.push("document.execCommand('copy') returned false.");
+    }
+    return ok;
   } catch (error) {
-      reasonsOut.push(error instanceof Error ? `execCommand fallback failed: ${error.message}` : "execCommand fallback failed");
-      return false;
+    reasonsOut.push(
+      error instanceof Error
+        ? `execCommand fallback failed: ${error.message}`
+        : "execCommand fallback failed"
+    );
+    return false;
   }
 }
 
 const OVERLAY_STYLES = `
-.aigrab-ui {
+.grabr-ui {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   z-index: 2147483647;
 }
 
-.aigrab-root {
+.grabr-root {
   position: fixed;
   inset: 0;
   pointer-events: none;
 }
 
-.aigrab-highlight {
+.grabr-highlight {
   position: fixed;
   z-index: 2147483646;
-  outline: 2px solid var(--aigrab-accent, #38bdf8);
+  outline: 2px solid var(--grabr-accent, #38bdf8);
   outline-offset: -2px;
-  background: color-mix(in srgb, var(--aigrab-accent, #38bdf8) 12%, transparent);
+  background: color-mix(in srgb, var(--grabr-accent, #38bdf8) 12%, transparent);
   border-radius: 6px;
   display: none;
 }
 
-.aigrab-highlight-label {
+.grabr-highlight-label {
   position: absolute;
   top: -22px;
   left: 0;
@@ -2008,8 +1986,8 @@ const OVERLAY_STYLES = `
   font-size: 11px;
   font-weight: 600;
   border-radius: 6px;
-  color: var(--aigrab-label-fg, #0b1220);
-  background: var(--aigrab-accent, #38bdf8);
+  color: var(--grabr-label-fg, #0b1220);
+  background: var(--grabr-accent, #38bdf8);
   box-shadow: 0 6px 18px rgba(0,0,0,0.20);
   white-space: nowrap;
   max-width: 70vw;
@@ -2019,20 +1997,20 @@ const OVERLAY_STYLES = `
   transition: opacity 120ms ease;
 }
 
-.aigrab-highlight-label.visible {
+.grabr-highlight-label.visible {
   opacity: 1;
 }
 
-.aigrab-selected {
+.grabr-selected {
   position: fixed;
   z-index: 2147483645;
-  outline: 2px solid var(--aigrab-ok, #22c55e);
+  outline: 2px solid var(--grabr-ok, #22c55e);
   outline-offset: -2px;
-  background: color-mix(in srgb, var(--aigrab-ok, #22c55e) 10%, transparent);
+  background: color-mix(in srgb, var(--grabr-ok, #22c55e) 10%, transparent);
   border-radius: 6px;
 }
 
-.aigrab-hud {
+.grabr-hud {
   position: fixed;
   left: 16px;
   bottom: 16px;
@@ -2040,24 +2018,24 @@ const OVERLAY_STYLES = `
   max-width: min(520px, calc(100vw - 32px));
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--aigrab-fg, #e5e7eb) 18%, transparent);
-  background: color-mix(in srgb, var(--aigrab-bg, #0b1220) 92%, transparent);
-  color: var(--aigrab-fg, #e5e7eb);
+  border: 1px solid color-mix(in srgb, var(--grabr-fg, #e5e7eb) 18%, transparent);
+  background: color-mix(in srgb, var(--grabr-bg, #0b1220) 92%, transparent);
+  color: var(--grabr-fg, #e5e7eb);
   box-shadow: 0 18px 60px rgba(0,0,0,0.32);
   display: none;
 }
 
-.aigrab-hud.visible {
+.grabr-hud.visible {
   display: block;
 }
 
-.aigrab-hud-row {
+.grabr-hud-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
 
-.aigrab-title {
+.grabr-title {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -2065,7 +2043,7 @@ const OVERLAY_STYLES = `
   opacity: 0.9;
 }
 
-.aigrab-status {
+.grabr-status {
   font-size: 13px;
   font-weight: 600;
   flex: 1;
@@ -2075,7 +2053,7 @@ const OVERLAY_STYLES = `
   white-space: nowrap;
 }
 
-.aigrab-sub {
+.grabr-sub {
   margin-top: 6px;
   font-size: 12px;
   opacity: 0.8;
@@ -2084,46 +2062,46 @@ const OVERLAY_STYLES = `
   gap: 8px;
 }
 
-.aigrab-kbd {
+.grabr-kbd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
   border-radius: 9999px;
-  border: 1px solid color-mix(in srgb, var(--aigrab-fg, #e5e7eb) 14%, transparent);
-  background: color-mix(in srgb, var(--aigrab-bg, #0b1220) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--grabr-fg, #e5e7eb) 14%, transparent);
+  background: color-mix(in srgb, var(--grabr-bg, #0b1220) 70%, transparent);
 }
 
-.aigrab-key {
+.grabr-key {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 11px;
   font-weight: 700;
   opacity: 0.95;
 }
 
-.aigrab-help {
+.grabr-help {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--aigrab-fg, #e5e7eb) 12%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--grabr-fg, #e5e7eb) 12%, transparent);
   font-size: 12px;
   opacity: 0.85;
   display: none;
 }
 
-.aigrab-help.visible {
+.grabr-help.visible {
   display: block;
 }
 
-.aigrab-toast {
+.grabr-toast {
   position: fixed;
   right: 16px;
   top: 16px;
   max-width: min(520px, calc(100vw - 32px));
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--aigrab-fg, #e5e7eb) 16%, transparent);
-  background: color-mix(in srgb, var(--aigrab-bg, #0b1220) 92%, transparent);
-  color: var(--aigrab-fg, #e5e7eb);
+  border: 1px solid color-mix(in srgb, var(--grabr-fg, #e5e7eb) 16%, transparent);
+  background: color-mix(in srgb, var(--grabr-bg, #0b1220) 92%, transparent);
+  color: var(--grabr-fg, #e5e7eb);
   box-shadow: 0 18px 60px rgba(0,0,0,0.32);
   transform: translateY(-6px);
   opacity: 0;
@@ -2131,44 +2109,44 @@ const OVERLAY_STYLES = `
   pointer-events: none;
 }
 
-.aigrab-toast.visible {
+.grabr-toast.visible {
   transform: translateY(0);
   opacity: 1;
 }
 
-.aigrab-toast.ok {
-  border-color: color-mix(in srgb, var(--aigrab-ok, #22c55e) 45%, transparent);
+.grabr-toast.ok {
+  border-color: color-mix(in srgb, var(--grabr-ok, #22c55e) 45%, transparent);
 }
 
-.aigrab-toast.err {
-  border-color: color-mix(in srgb, var(--aigrab-err, #ef4444) 55%, transparent);
+.grabr-toast.err {
+  border-color: color-mix(in srgb, var(--grabr-err, #ef4444) 55%, transparent);
 }
 
 @media (prefers-color-scheme: light) {
-  .aigrab-ui {
-      --aigrab-bg: #ffffff;
-      --aigrab-fg: #0b1220;
-      --aigrab-label-fg: #0b1220;
-      --aigrab-accent: #0284c7;
-      --aigrab-ok: #16a34a;
-      --aigrab-err: #dc2626;
+  .grabr-ui {
+      --grabr-bg: #ffffff;
+      --grabr-fg: #0b1220;
+      --grabr-label-fg: #0b1220;
+      --grabr-accent: #0284c7;
+      --grabr-ok: #16a34a;
+      --grabr-err: #dc2626;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .aigrab-highlight-label,
-  .aigrab-toast {
+  .grabr-highlight-label,
+  .grabr-toast {
       transition: none;
   }
 }
 `;
 
-function injectAiGrabStyles(): void {
+function injectGrabrStyles(): void {
   if (typeof document === "undefined") return;
-  if (document.getElementById("aigrab-styles")) return;
+  if (document.getElementById("grabr-styles")) return;
 
   const style = document.createElement("style");
-  style.id = "aigrab-styles";
+  style.id = "grabr-styles";
   style.textContent = OVERLAY_STYLES;
   document.head.appendChild(style);
 }
@@ -2179,27 +2157,39 @@ type SelectionFinalizeProgress =
   | { readonly phase: "done"; readonly completed: number; readonly total: number }
   | { readonly phase: "error"; readonly completed: number; readonly total: number; readonly message: string };
 
-function isFiniteIntegerInRange(value: unknown, min: number, max: number): value is number {
-  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= min && value <= max;
+function isFiniteIntegerInRange(
+  value: unknown,
+  min: number,
+  max: number
+): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+  );
 }
 
-function validateRuntimeConfigOrThrow(config: AiGrabRuntimeConfig): void {
+function validateRuntimeConfigOrThrow(config: GrabrRuntimeConfig): void {
   if (
-      config.reactInspectorMode !== "best-effort" &&
-      config.reactInspectorMode !== "required" &&
-      config.reactInspectorMode !== "off"
+    config.reactInspectorMode !== "best-effort" &&
+    config.reactInspectorMode !== "required" &&
+    config.reactInspectorMode !== "off"
   ) {
-      throw new Error(
-          `Invalid config.reactInspectorMode: expected "best-effort" | "required" | "off", got ${String(config.reactInspectorMode)}`
-      );
+    throw new Error(
+      `Invalid config.reactInspectorMode: expected "best-effort" | "required" | "off", got ${String(
+        config.reactInspectorMode
+      )}`
+    );
   }
+
   if (!isFiniteIntegerInRange(config.maxReactStackFrames, 1, 64)) {
-      throw new Error(
-          `Invalid config.maxReactStackFrames: expected integer in range [1, 64], got ${String(config.maxReactStackFrames)}`
-      );
-  }
-  if (!config.heuristics || !Array.isArray(config.heuristics.frameworkStrategies) || !Array.isArray(config.heuristics.dataSourceStrategies)) {
-      throw new Error(`Invalid config.heuristics: expected { frameworkStrategies: Strategy[], dataSourceStrategies: Strategy[] }`);
+    throw new Error(
+      `Invalid config.maxReactStackFrames: expected integer in range [1, 64], got ${String(
+        config.maxReactStackFrames
+      )}`
+    );
   }
 }
 
@@ -2207,19 +2197,16 @@ function dedupeElementsPreserveOrder(elements: readonly Element[]): Element[] {
   const out: Element[] = [];
   const seen = new Set<Element>();
   for (const el of elements) {
-      if (!seen.has(el)) {
-          seen.add(el);
-          out.push(el);
-      }
+    if (seen.has(el)) continue;
+    seen.add(el);
+    out.push(el);
   }
   return out;
 }
 
 function isElementConnectedToDocument(el: Element): boolean {
-  const anyEl = el as unknown as { readonly isConnected?: boolean };
-  if (typeof anyEl.isConnected === "boolean") return anyEl.isConnected;
   if (typeof document === "undefined") return false;
-  return document.documentElement.contains(el);
+  return el.isConnected || document.documentElement.contains(el);
 }
 
 function formatElementLabel(el: Element): string {
@@ -2232,159 +2219,182 @@ function formatElementLabel(el: Element): string {
   return tag;
 }
 
-class AiGrabController implements AiGrabApi {
+class GrabrController implements GrabrApi {
   readonly version: string = "2.2.0";
-  readonly config: Readonly<AiGrabRuntimeConfig>;
+  readonly config: Readonly<GrabrRuntimeConfig>;
 
   private readonly inspector: InspectorEngine;
   private readonly providerRegistry: Map<string, AgentProvider> = new Map();
   private activeProvider: AgentProvider;
 
-  private currentSession: AiGrabSession | null = null;
+  private currentSession: GrabrSession | null = null;
   private currentInstruction: string | null = null;
 
   private overlay: SelectionOverlay | null = null;
 
-  constructor(inspector: InspectorEngine, initialProvider: AgentProvider, config: AiGrabRuntimeConfig) {
-      this.inspector = inspector;
-      this.activeProvider = initialProvider;
-      this.providerRegistry.set(initialProvider.id, initialProvider);
-      this.config = config;
+  constructor(
+    inspector: InspectorEngine,
+    initialProvider: AgentProvider,
+    config: GrabrRuntimeConfig
+  ) {
+    this.inspector = inspector;
+    this.activeProvider = initialProvider;
+    this.providerRegistry.set(initialProvider.id, initialProvider);
+    this.config = config;
   }
 
   attachOverlay(overlay: SelectionOverlay): void {
-      this.overlay = overlay;
+    this.overlay = overlay;
   }
 
   startSelectionSession(userInstruction?: string | null): void {
-      const normalized =
-          typeof userInstruction === "string" ? userInstruction.trim() : userInstruction ?? null;
+    const trimmed =
+      typeof userInstruction === "string" ? userInstruction.trim() : null;
+    this.currentInstruction = trimmed && trimmed.length > 0 ? trimmed : null;
 
-      this.currentInstruction = normalized && normalized.length > 0 ? normalized : null;
-
-      if (this.overlay) {
-          this.overlay.beginSelection();
-      } else {
-          // eslint-disable-next-line no-console
-          console.warn("[aigrab] startSelectionSession called, but no overlay attached.");
-      }
+    if (this.overlay) {
+      this.overlay.beginSelection();
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn("[grabr] startSelectionSession called, but no overlay attached.");
+    }
   }
 
-  getCurrentSession(): AiGrabSession | null {
-      return this.currentSession;
+  getCurrentSession(): GrabrSession | null {
+    return this.currentSession;
   }
 
   registerAgentProvider(provider: AgentProvider): void {
-      this.providerRegistry.set(provider.id, provider);
+    this.providerRegistry.set(provider.id, provider);
   }
 
   setActiveAgentProvider(id: string): void {
-      const provider = this.providerRegistry.get(id);
-      if (provider) {
-          this.activeProvider = provider;
-      }
+    const provider = this.providerRegistry.get(id);
+    if (provider) this.activeProvider = provider;
   }
 
-  async finalizeSelection(elements: readonly Element[], onProgress?: (progress: SelectionFinalizeProgress) => void): Promise<void> {
-      const inputArray = Array.isArray(elements) ? elements : [];
-      const deduped = dedupeElementsPreserveOrder(inputArray);
-      const connected = deduped.filter((el) => el instanceof Element && isElementConnectedToDocument(el));
+  async finalizeSelection(
+    elements: readonly Element[],
+    onProgress?: (progress: SelectionFinalizeProgress) => void
+  ): Promise<void> {
+    const connected = dedupeElementsPreserveOrder(elements).filter(
+      isElementConnectedToDocument
+    );
 
-      if (connected.length === 0) {
-          onProgress?.({ phase: "error", completed: 0, total: 0, message: "No valid elements to capture." });
-          return;
+    if (connected.length === 0) {
+      onProgress?.({
+        phase: "error",
+        completed: 0,
+        total: 0,
+        message: "No valid elements to capture.",
+      });
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    const url = window.location.href;
+
+    const sessionId =
+      typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${createdAt}-${Math.random().toString(16).slice(2)}`;
+
+    const total = connected.length;
+    onProgress?.({ phase: "building-context", completed: 0, total });
+
+    let completed = 0;
+    let failed = 0;
+
+    const contextsOrNull = await mapWithConcurrencyLimit(
+      connected,
+      2,
+      async (el): Promise<ElementContextV2 | null> => {
+        try {
+          return await this.inspector.getElementContext(el);
+        } catch (error) {
+          failed += 1;
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[grabr] Failed to capture element context:",
+            error instanceof Error ? error.message : error
+          );
+          return null;
+        } finally {
+          completed += 1;
+          onProgress?.({ phase: "building-context", completed, total });
+        }
       }
+    );
 
-      const createdAt = new Date().toISOString();
-      const url =
-          typeof window !== "undefined" && typeof window.location !== "undefined" ? window.location.href : "";
+    const contexts = contextsOrNull.filter(
+      (c): c is ElementContextV2 => c !== null
+    );
 
-      const sessionId =
-          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-              ? crypto.randomUUID()
-              : `${createdAt}-${Math.random().toString(16).slice(2)}`;
+    if (contexts.length === 0) {
+      onProgress?.({
+        phase: "error",
+        completed,
+        total,
+        message: "Failed to capture context for all selected elements.",
+      });
+      return;
+    }
 
-      const total = connected.length;
-      onProgress?.({ phase: "building-context", completed: 0, total });
+    const summary =
+      failed > 0
+        ? `Session with ${contexts.length} element(s) captured; ${failed} failed.`
+        : `Session with ${contexts.length} element(s) captured.`;
 
-      const concurrencyLimit = 2;
-      let completed = 0;
-      let failed = 0;
+    const session: GrabrSession = {
+      id: sessionId,
+      createdAt,
+      url,
+      userInstruction: this.currentInstruction,
+      summary,
+      elements: contexts,
+    };
 
-      const contextsOrNull = await mapWithConcurrencyLimit(
-          connected,
-          concurrencyLimit,
-          async (el): Promise<ElementContextV2 | null> => {
-              try {
-                  const context = await this.inspector.getElementContext(el);
-                  return context;
-              } catch (error) {
-                  failed += 1;
-                  // eslint-disable-next-line no-console
-                  console.warn(
-                      "[aigrab] Failed to capture element context:",
-                      error instanceof Error ? error.message : error
-                  );
-                  return null;
-              } finally {
-                  completed += 1;
-                  onProgress?.({ phase: "building-context", completed, total });
-              }
-          }
+    this.currentSession = session;
+
+    onProgress?.({ phase: "sending", completed: total, total });
+
+    try {
+      await this.activeProvider.sendContext(session);
+      this.activeProvider.onSuccess?.(session);
+
+      onProgress?.({ phase: "done", completed: total, total });
+
+      this.overlay?.showToast(
+        contexts.length === 1
+          ? "Copied context for 1 element."
+          : `Copied context for ${contexts.length} elements.`,
+        false
       );
 
-      const contexts = contextsOrNull.filter((c): c is ElementContextV2 => c !== null);
-
-      if (contexts.length === 0) {
-          onProgress?.({ phase: "error", completed, total, message: "Failed to capture context for all selected elements." });
-          return;
+      if (failed > 0) {
+        this.overlay?.showToast(
+          `Warning: ${failed} element(s) failed to capture.`,
+          true
+        );
       }
-
-      const summary =
-          failed > 0
-              ? `Session with ${contexts.length} element(s) captured; ${failed} failed.`
-              : `Session with ${contexts.length} element(s) captured.`;
-
-      const session: AiGrabSession = {
-          id: sessionId,
-          createdAt,
-          url,
-          userInstruction: this.currentInstruction,
-          summary,
-          elements: contexts,
-      };
-
-      this.currentSession = session;
-
-      onProgress?.({ phase: "sending", completed: total, total });
-
-      try {
-          await this.activeProvider.sendContext(session);
-          this.activeProvider.onSuccess?.(session);
-
-          onProgress?.({ phase: "done", completed: total, total });
-
-          this.overlay?.showToast(
-              contexts.length === 1 ? "Copied context for 1 element." : `Copied context for ${contexts.length} elements.`,
-              false
-          );
-
-          if (failed > 0) {
-              this.overlay?.showToast(`Warning: ${failed} element(s) failed to capture.`, true);
-          }
-      } catch (error) {
-          const err = error instanceof Error ? error : new Error("Failed to send context.");
-          this.activeProvider.onError?.(session, err);
-          onProgress?.({ phase: "error", completed: total, total, message: err.message });
-          this.overlay?.showToast(err.message, true);
-      }
+    } catch (error) {
+      const err =
+        error instanceof Error ? error : new Error("Failed to send context.");
+      this.activeProvider.onError?.(session, err);
+      onProgress?.({
+        phase: "error",
+        completed: total,
+        total,
+        message: err.message,
+      });
+      this.overlay?.showToast(err.message, true);
+    }
   }
 
   dispose(): void {
-      if (this.overlay) {
-          this.overlay.dispose();
-          this.overlay = null;
-      }
+    if (!this.overlay) return;
+    this.overlay.dispose();
+    this.overlay = null;
   }
 }
 
@@ -2393,30 +2403,24 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
   limit: number,
   mapper: (item: TIn, index: number) => Promise<TOut>
 ): Promise<TOut[]> {
-  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 1;
   const results: TOut[] = new Array(items.length);
   let nextIndex = 0;
 
-  const workers: Array<Promise<void>> = [];
   const runWorker = async (): Promise<void> => {
-      while (true) {
-          const currentIndex = nextIndex;
-          nextIndex += 1;
-          if (currentIndex >= items.length) return;
-          results[currentIndex] = await mapper(items[currentIndex] as TIn, currentIndex);
-      }
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      results[currentIndex] = await mapper(items[currentIndex]!, currentIndex);
+    }
   };
 
-  const workerCount = Math.min(safeLimit, items.length);
-  for (let i = 0; i < workerCount; i += 1) {
-      workers.push(runWorker());
-  }
+  const workerCount = Math.min(limit, items.length);
+  const workers = Array.from({ length: workerCount }, () => runWorker());
   await Promise.all(workers);
   return results;
 }
 
 class SelectionOverlay {
-  private readonly controller: AiGrabController;
+  private readonly controller: GrabrController;
 
   private readonly root: HTMLDivElement;
   private readonly highlight: HTMLDivElement;
@@ -2443,488 +2447,497 @@ class SelectionOverlay {
 
   private toastTimer: number | null = null;
 
-  constructor(controller: AiGrabController) {
-      this.controller = controller;
+  constructor(controller: GrabrController) {
+    this.controller = controller;
 
-      injectAiGrabStyles();
+    injectGrabrStyles();
 
-      this.root = document.createElement("div");
-      this.root.className = "aigrab-ui aigrab-root";
+    this.root = document.createElement("div");
+    this.root.className = "grabr-ui grabr-root";
 
-      this.highlight = document.createElement("div");
-      this.highlight.className = "aigrab-highlight";
+    this.highlight = document.createElement("div");
+    this.highlight.className = "grabr-highlight";
 
-      this.highlightLabel = document.createElement("div");
-      this.highlightLabel.className = "aigrab-highlight-label";
-      this.highlight.appendChild(this.highlightLabel);
+    this.highlightLabel = document.createElement("div");
+    this.highlightLabel.className = "grabr-highlight-label";
+    this.highlight.appendChild(this.highlightLabel);
 
-      this.hud = document.createElement("div");
-      this.hud.className = "aigrab-hud";
+    this.hud = document.createElement("div");
+    this.hud.className = "grabr-hud";
 
-      const hudRow = document.createElement("div");
-      hudRow.className = "aigrab-hud-row";
+    const hudRow = document.createElement("div");
+    hudRow.className = "grabr-hud-row";
 
-      const hudTitle = document.createElement("div");
-      hudTitle.className = "aigrab-title";
-      hudTitle.textContent = "AI Grab";
+    const hudTitle = document.createElement("div");
+    hudTitle.className = "grabr-title";
+    hudTitle.textContent = "AI Grab";
 
-      this.hudStatus = document.createElement("div");
-      this.hudStatus.className = "aigrab-status";
-      this.hudStatus.textContent = "Idle";
+    this.hudStatus = document.createElement("div");
+    this.hudStatus.className = "grabr-status";
+    this.hudStatus.textContent = "Idle";
 
-      hudRow.appendChild(hudTitle);
-      hudRow.appendChild(this.hudStatus);
+    hudRow.appendChild(hudTitle);
+    hudRow.appendChild(this.hudStatus);
 
-      this.hudSub = document.createElement("div");
-      this.hudSub.className = "aigrab-sub";
-      this.hudSub.innerHTML = `
-          <span class="aigrab-kbd"><span class="aigrab-key">Click</span> select</span>
-          <span class="aigrab-kbd"><span class="aigrab-key">Shift</span> multi</span>
-          <span class="aigrab-kbd"><span class="aigrab-key">Enter</span> finish</span>
-          <span class="aigrab-kbd"><span class="aigrab-key">Esc</span> cancel</span>
-          <span class="aigrab-kbd"><span class="aigrab-key">?</span> help</span>
-      `.trim();
+    this.hudSub = document.createElement("div");
+    this.hudSub.className = "grabr-sub";
+    this.hudSub.innerHTML = `
+      <span class="grabr-kbd"><span class="grabr-key">Click</span> select</span>
+      <span class="grabr-kbd"><span class="grabr-key">Shift</span> multi</span>
+      <span class="grabr-kbd"><span class="grabr-key">Enter</span> finish</span>
+      <span class="grabr-kbd"><span class="grabr-key">Esc</span> cancel</span>
+      <span class="grabr-kbd"><span class="grabr-key">?</span> help</span>
+    `.trim();
 
-      this.hudHelp = document.createElement("div");
-      this.hudHelp.className = "aigrab-help";
-      this.hudHelp.textContent =
-          "Shortcuts: Backspace=undo, X=clear, ArrowUp/P=parent, Enter=finish, Esc=cancel.";
+    this.hudHelp = document.createElement("div");
+    this.hudHelp.className = "grabr-help";
+    this.hudHelp.textContent =
+      "Shortcuts: Backspace=undo, X=clear, ArrowUp/P=parent, Enter=finish, Esc=cancel.";
 
-      this.hud.appendChild(hudRow);
-      this.hud.appendChild(this.hudSub);
-      this.hud.appendChild(this.hudHelp);
+    this.hud.appendChild(hudRow);
+    this.hud.appendChild(this.hudSub);
+    this.hud.appendChild(this.hudHelp);
 
-      this.toast = document.createElement("div");
-      this.toast.className = "aigrab-toast";
-      this.toast.setAttribute("role", "status");
-      this.toast.setAttribute("aria-live", "polite");
+    this.toast = document.createElement("div");
+    this.toast.className = "grabr-toast";
+    this.toast.setAttribute("role", "status");
+    this.toast.setAttribute("aria-live", "polite");
 
-      this.root.appendChild(this.highlight);
-      this.root.appendChild(this.hud);
-      this.root.appendChild(this.toast);
+    this.root.appendChild(this.highlight);
+    this.root.appendChild(this.hud);
+    this.root.appendChild(this.toast);
 
-      document.documentElement.appendChild(this.root);
+    document.documentElement.appendChild(this.root);
 
-      this.registerGlobalToggleShortcut();
+    this.registerGlobalToggleShortcut();
   }
 
   beginSelection(): void {
-      if (this.sending) return;
+    if (this.sending) return;
 
-      this.selectedElements = [];
-      this.hoveredElement = null;
-      this.helpVisible = false;
+    this.selectedElements = [];
+    this.hoveredElement = null;
+    this.helpVisible = false;
 
-      this.clearSelectionBoxes();
+    this.clearSelectionBoxes();
 
-      this.selecting = true;
-      this.hud.classList.add("visible");
+    this.selecting = true;
+    this.hud.classList.add("visible");
 
-      this.updateHudState();
-      this.attachSelectionListeners();
+    this.updateHudState();
+    this.attachSelectionListeners();
   }
 
   dispose(): void {
-      this.detachSelectionListeners();
-      this.clearSelectionBoxes();
+    this.detachSelectionListeners();
+    this.clearSelectionBoxes();
 
-      if (this.toastTimer !== null) {
-          window.clearTimeout(this.toastTimer);
-          this.toastTimer = null;
-      }
+    if (this.toastTimer !== null) {
+      window.clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
 
-      if (this.root.parentElement) {
-          this.root.parentElement.removeChild(this.root);
-      }
+    this.root.parentElement?.removeChild(this.root);
   }
 
   showToast(message: string, isError: boolean): void {
-      if (this.toastTimer !== null) {
-          window.clearTimeout(this.toastTimer);
-          this.toastTimer = null;
-      }
+    if (this.toastTimer !== null) {
+      window.clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
 
-      this.toast.textContent = message;
-      this.toast.classList.remove("ok", "err");
-      this.toast.classList.add(isError ? "err" : "ok");
-      this.toast.classList.add("visible");
+    this.toast.textContent = message;
+    this.toast.classList.remove("ok", "err");
+    this.toast.classList.add(isError ? "err" : "ok");
+    this.toast.classList.add("visible");
 
-      this.toastTimer = window.setTimeout(() => {
-          this.toast.classList.remove("visible");
-          this.toastTimer = null;
-      }, 2600);
+    this.toastTimer = window.setTimeout(() => {
+      this.toast.classList.remove("visible");
+      this.toastTimer = null;
+    }, 2600);
   }
 
   private registerGlobalToggleShortcut(): void {
-      document.addEventListener(
-          "keydown",
-          (event: KeyboardEvent) => {
-              if (
-                  event.altKey &&
-                  event.shiftKey &&
-                  (event.key.toLowerCase() === "g" || event.code === "KeyG")
-              ) {
-                  event.preventDefault();
-                  if (this.selecting || this.sending) {
-                      this.cancelSelection();
-                  } else {
-                      this.beginSelection();
-                  }
-              }
-          },
-          false
-      );
+    document.addEventListener(
+      "keydown",
+      (event: KeyboardEvent) => {
+        if (
+          event.altKey &&
+          event.shiftKey &&
+          (event.key.toLowerCase() === "g" || event.code === "KeyG")
+        ) {
+          event.preventDefault();
+          if (this.selecting || this.sending) {
+            this.cancelSelection();
+          } else {
+            this.beginSelection();
+          }
+        }
+      },
+      false
+    );
   }
 
   private attachSelectionListeners(): void {
-      document.addEventListener("mousemove", this.onMouseMove, true);
-      document.addEventListener("click", this.onClick, true);
-      document.addEventListener("keydown", this.onKeyDown, true);
-      window.addEventListener("scroll", this.onViewportChange, true);
-      window.addEventListener("resize", this.onViewportChange, true);
+    document.addEventListener("mousemove", this.onMouseMove, true);
+    document.addEventListener("click", this.onClick, true);
+    document.addEventListener("keydown", this.onKeyDown, true);
+    window.addEventListener("scroll", this.onViewportChange, true);
+    window.addEventListener("resize", this.onViewportChange, true);
   }
 
   private detachSelectionListeners(): void {
-      document.removeEventListener("mousemove", this.onMouseMove, true);
-      document.removeEventListener("click", this.onClick, true);
-      document.removeEventListener("keydown", this.onKeyDown, true);
-      window.removeEventListener("scroll", this.onViewportChange, true);
-      window.removeEventListener("resize", this.onViewportChange, true);
+    document.removeEventListener("mousemove", this.onMouseMove, true);
+    document.removeEventListener("click", this.onClick, true);
+    document.removeEventListener("keydown", this.onKeyDown, true);
+    window.removeEventListener("scroll", this.onViewportChange, true);
+    window.removeEventListener("resize", this.onViewportChange, true);
   }
 
   private onViewportChange = (): void => {
-      if (!this.selecting) return;
-      if (this.rafReflowPending) return;
+    if (!this.selecting) return;
+    if (this.rafReflowPending) return;
 
-      this.rafReflowPending = true;
-      window.requestAnimationFrame(() => {
-          this.rafReflowPending = false;
-          this.reflowOverlays();
-      });
+    this.rafReflowPending = true;
+    window.requestAnimationFrame(() => {
+      this.rafReflowPending = false;
+      this.reflowOverlays();
+    });
   };
 
   private onMouseMove = (event: MouseEvent): void => {
-      if (!this.selecting || this.sending) return;
+    if (!this.selecting || this.sending) return;
 
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (this.root.contains(target)) return;
-      if (target === this.hoveredElement) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (this.root.contains(target)) return;
+    if (target === this.hoveredElement) return;
 
-      this.hoveredElement = target;
+    this.hoveredElement = target;
 
-      if (this.rafPending) return;
-      this.rafPending = true;
+    if (this.rafPending) return;
+    this.rafPending = true;
 
-      window.requestAnimationFrame(() => {
-          this.rafPending = false;
-          this.updateHighlight();
-      });
+    window.requestAnimationFrame(() => {
+      this.rafPending = false;
+      this.updateHighlight();
+    });
   };
 
   private onClick = (event: MouseEvent): void => {
-      if (!this.selecting || this.sending) return;
-      if (event.button !== 0) return;
+    if (!this.selecting || this.sending) return;
+    if (event.button !== 0) return;
 
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (this.root.contains(target)) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (this.root.contains(target)) return;
 
-      event.preventDefault();
-      event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
 
-      const multi = event.shiftKey || event.metaKey || event.ctrlKey;
-      this.toggleSelection(target, multi);
+    const multi = event.shiftKey || event.metaKey || event.ctrlKey;
+    this.toggleSelection(target, multi);
   };
 
   private onKeyDown = (event: KeyboardEvent): void => {
-      if (!this.selecting || this.sending) return;
+    if (!this.selecting || this.sending) return;
 
-      if (event.key === "Escape") {
-          event.preventDefault();
-          this.cancelSelection();
-          return;
-      }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.cancelSelection();
+      return;
+    }
 
-      if (event.key === "Enter") {
-          event.preventDefault();
-          void this.finalizeSelection();
-          return;
-      }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void this.finalizeSelection();
+      return;
+    }
 
-      if (event.key === "Backspace") {
-          event.preventDefault();
-          this.undoSelection();
-          return;
-      }
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      this.undoSelection();
+      return;
+    }
 
-      if (event.key === "?" || event.key.toLowerCase() === "h") {
-          event.preventDefault();
-          this.toggleHelp();
-          return;
-      }
+    if (event.key === "?" || event.key.toLowerCase() === "h") {
+      event.preventDefault();
+      this.toggleHelp();
+      return;
+    }
 
-      if (event.key === "ArrowUp" || event.key.toLowerCase() === "p") {
-          event.preventDefault();
-          this.selectHoveredParent();
-          return;
-      }
+    if (event.key === "ArrowUp" || event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      this.selectHoveredParent();
+      return;
+    }
 
-      if (event.key.toLowerCase() === "x") {
-          event.preventDefault();
-          this.clearSelection();
-          return;
-      }
+    if (event.key.toLowerCase() === "x") {
+      event.preventDefault();
+      this.clearSelection();
+      return;
+    }
   };
 
   private cancelSelection(): void {
+    this.selecting = false;
+    this.sending = false;
+    this.helpVisible = false;
+
+    this.hoveredElement = null;
+    this.selectedElements = [];
+
+    this.detachSelectionListeners();
+    this.clearSelectionBoxes();
+
+    this.highlight.style.display = "none";
+    this.hud.classList.remove("visible");
+    this.hudHelp.classList.remove("visible");
+  }
+
+  private toggleHelp(): void {
+    this.helpVisible = !this.helpVisible;
+    this.hudHelp.classList.toggle("visible", this.helpVisible);
+  }
+
+  private clearSelection(): void {
+    this.selectedElements = [];
+    this.updateSelectionBoxes();
+    this.updateHudState();
+  }
+
+  private undoSelection(): void {
+    if (this.selectedElements.length === 0) return;
+    this.selectedElements.pop();
+    this.updateSelectionBoxes();
+    this.updateHudState();
+  }
+
+  private selectHoveredParent(): void {
+    if (!this.hoveredElement) return;
+    const parent = this.hoveredElement.parentElement;
+    if (!parent) return;
+    if (this.root.contains(parent)) return;
+
+    this.hoveredElement = parent;
+    this.updateHighlight();
+  }
+
+  private async finalizeSelection(): Promise<void> {
+    if (this.selectedElements.length === 0 && this.hoveredElement) {
+      this.selectedElements = [this.hoveredElement];
+    }
+
+    const connected = dedupeElementsPreserveOrder(this.selectedElements).filter(
+      isElementConnectedToDocument
+    );
+
+    if (connected.length === 0) {
+      this.cancelSelection();
+      return;
+    }
+
+    this.sending = true;
+    this.updateHudState();
+
+    this.detachSelectionListeners();
+    this.highlight.style.display = "none";
+
+    try {
+      await this.controller.finalizeSelection(connected, (progress) =>
+        this.updateHudProgress(progress)
+      );
+    } finally {
       this.selecting = false;
       this.sending = false;
       this.helpVisible = false;
 
-      this.hoveredElement = null;
-      this.selectedElements = [];
-
-      this.detachSelectionListeners();
       this.clearSelectionBoxes();
-
-      this.highlight.style.display = "none";
       this.hud.classList.remove("visible");
       this.hudHelp.classList.remove("visible");
-  }
-
-  private toggleHelp(): void {
-      this.helpVisible = !this.helpVisible;
-      this.hudHelp.classList.toggle("visible", this.helpVisible);
-  }
-
-  private clearSelection(): void {
-      this.selectedElements = [];
-      this.updateSelectionBoxes();
-      this.updateHudState();
-  }
-
-  private undoSelection(): void {
-      if (this.selectedElements.length === 0) return;
-      this.selectedElements.pop();
-      this.updateSelectionBoxes();
-      this.updateHudState();
-  }
-
-  private selectHoveredParent(): void {
-      if (!this.hoveredElement) return;
-      const parent = this.hoveredElement.parentElement;
-      if (!parent) return;
-      if (this.root.contains(parent)) return;
-
-      this.hoveredElement = parent;
-      this.updateHighlight();
-  }
-
-  private async finalizeSelection(): Promise<void> {
-      if (this.selectedElements.length === 0 && this.hoveredElement) {
-          this.selectedElements = [this.hoveredElement];
-      }
-
-      const deduped = dedupeElementsPreserveOrder(this.selectedElements);
-      const connected = deduped.filter((el) => el instanceof Element && isElementConnectedToDocument(el));
-
-      if (connected.length === 0) {
-          this.cancelSelection();
-          return;
-      }
-
-      this.sending = true;
-      this.updateHudState();
-
-      this.detachSelectionListeners();
-      this.highlight.style.display = "none";
-
-      try {
-          await this.controller.finalizeSelection(connected, (progress) => {
-              this.updateHudProgress(progress);
-          });
-      } finally {
-          this.selecting = false;
-          this.sending = false;
-          this.helpVisible = false;
-
-          this.clearSelectionBoxes();
-          this.hud.classList.remove("visible");
-          this.hudHelp.classList.remove("visible");
-      }
+    }
   }
 
   private updateHudProgress(progress: SelectionFinalizeProgress): void {
-      const total = progress.total;
+    const total = progress.total;
 
-      if (progress.phase === "building-context") {
-          this.hudStatus.textContent = `Capturing context… ${progress.completed}/${total}`;
-          return;
-      }
-      if (progress.phase === "sending") {
-          this.hudStatus.textContent = "Sending…";
-          return;
-      }
-      if (progress.phase === "done") {
-          this.hudStatus.textContent = "Done.";
-          return;
-      }
-      this.hudStatus.textContent = `Error: ${progress.message}`;
+    if (progress.phase === "building-context") {
+      this.hudStatus.textContent = `Capturing context… ${progress.completed}/${total}`;
+      return;
+    }
+    if (progress.phase === "sending") {
+      this.hudStatus.textContent = "Sending…";
+      return;
+    }
+    if (progress.phase === "done") {
+      this.hudStatus.textContent = "Done.";
+      return;
+    }
+    this.hudStatus.textContent = `Error: ${progress.message}`;
   }
 
   private updateHudState(): void {
-      if (!this.selecting) {
-          this.hudStatus.textContent = "Idle";
-          return;
-      }
-      if (this.sending) {
-          const count = this.selectedElements.length;
-          this.hudStatus.textContent =
-              count === 1 ? "Capturing context… (1 element)" : `Capturing context… (${count} elements)`;
-          return;
-      }
-
+    if (!this.selecting) {
+      this.hudStatus.textContent = "Idle";
+      return;
+    }
+    if (this.sending) {
       const count = this.selectedElements.length;
-      const hovered = this.hoveredElement;
+      this.hudStatus.textContent =
+        count === 1
+          ? "Capturing context… (1 element)"
+          : `Capturing context… (${count} elements)`;
+      return;
+    }
 
-      if (count === 0) {
-          this.hudStatus.textContent = hovered ? `Hovering: ${formatElementLabel(hovered)}` : "Hover an element to inspect";
-      } else if (count === 1) {
-          this.hudStatus.textContent = `Selected: 1 (${formatElementLabel(this.selectedElements[0] as Element)})`;
-      } else {
-          const last = this.selectedElements[this.selectedElements.length - 1] as Element;
-          this.hudStatus.textContent = `Selected: ${count} (last: ${formatElementLabel(last)})`;
-      }
+    const count = this.selectedElements.length;
+    const hovered = this.hoveredElement;
+
+    if (count === 0) {
+      this.hudStatus.textContent = hovered
+        ? `Hovering: ${formatElementLabel(hovered)}`
+        : "Hover an element to inspect";
+    } else if (count === 1) {
+      this.hudStatus.textContent = `Selected: 1 (${formatElementLabel(
+        this.selectedElements[0]!
+      )})`;
+    } else {
+      const last = this.selectedElements[this.selectedElements.length - 1]!;
+      this.hudStatus.textContent = `Selected: ${count} (last: ${formatElementLabel(
+        last
+      )})`;
+    }
   }
 
   private toggleSelection(el: Element, multi: boolean): void {
-      if (!multi) {
-          this.selectedElements = [el];
+    if (!multi) {
+      this.selectedElements = [el];
+    } else {
+      const index = this.selectedElements.indexOf(el);
+      if (index >= 0) {
+        this.selectedElements.splice(index, 1);
       } else {
-          const index = this.selectedElements.indexOf(el);
-          if (index >= 0) {
-              this.selectedElements.splice(index, 1);
-          } else {
-              this.selectedElements.push(el);
-          }
+        this.selectedElements.push(el);
       }
+    }
 
-      this.selectedElements = this.selectedElements.filter((e) => isElementConnectedToDocument(e));
+    this.selectedElements = this.selectedElements.filter(
+      isElementConnectedToDocument
+    );
 
-      this.updateSelectionBoxes();
-      this.updateHudState();
+    this.updateSelectionBoxes();
+    this.updateHudState();
   }
 
   private updateHighlight(): void {
-      const el = this.hoveredElement;
-      if (!el || !isElementConnectedToDocument(el)) {
-          this.highlight.style.display = "none";
-          this.highlightLabel.classList.remove("visible");
-          return;
-      }
+    const el = this.hoveredElement;
+    if (!el || !isElementConnectedToDocument(el)) {
+      this.highlight.style.display = "none";
+      this.highlightLabel.classList.remove("visible");
+      return;
+    }
 
-      const rect = el.getBoundingClientRect();
-      if (!Number.isFinite(rect.left) || rect.width <= 0 || rect.height <= 0) {
-          this.highlight.style.display = "none";
-          this.highlightLabel.classList.remove("visible");
-          return;
-      }
+    const rect = el.getBoundingClientRect();
+    if (!Number.isFinite(rect.left) || rect.width <= 0 || rect.height <= 0) {
+      this.highlight.style.display = "none";
+      this.highlightLabel.classList.remove("visible");
+      return;
+    }
 
-      this.highlight.style.display = "block";
-      this.highlight.style.left = `${rect.left}px`;
-      this.highlight.style.top = `${rect.top}px`;
-      this.highlight.style.width = `${rect.width}px`;
-      this.highlight.style.height = `${rect.height}px`;
+    this.highlight.style.display = "block";
+    this.highlight.style.left = `${rect.left}px`;
+    this.highlight.style.top = `${rect.top}px`;
+    this.highlight.style.width = `${rect.width}px`;
+    this.highlight.style.height = `${rect.height}px`;
 
-      this.highlightLabel.textContent = formatElementLabel(el);
-      this.highlightLabel.classList.add("visible");
+    this.highlightLabel.textContent = formatElementLabel(el);
+    this.highlightLabel.classList.add("visible");
 
-      this.updateHudState();
+    this.updateHudState();
   }
 
   private reflowOverlays(): void {
-      this.updateHighlight();
-      this.updateSelectionBoxes();
+    this.updateHighlight();
+    this.updateSelectionBoxes();
   }
 
   private clearSelectionBoxes(): void {
-      for (const box of this.selectionBoxes) {
-          if (box.parentElement) {
-              box.parentElement.removeChild(box);
-          }
-      }
-      this.selectionBoxes.length = 0;
+    for (const box of this.selectionBoxes) {
+      box.parentElement?.removeChild(box);
+    }
+    this.selectionBoxes.length = 0;
   }
 
   private updateSelectionBoxes(): void {
-      this.clearSelectionBoxes();
+    this.clearSelectionBoxes();
 
-      for (const el of this.selectedElements) {
-          if (!isElementConnectedToDocument(el)) continue;
+    for (const el of this.selectedElements) {
+      if (!isElementConnectedToDocument(el)) continue;
 
-          const rect = el.getBoundingClientRect();
-          if (!Number.isFinite(rect.left) || rect.width <= 0 || rect.height <= 0) continue;
-
-          const box = document.createElement("div");
-          box.className = "aigrab-selected";
-          box.style.left = `${rect.left}px`;
-          box.style.top = `${rect.top}px`;
-          box.style.width = `${rect.width}px`;
-          box.style.height = `${rect.height}px`;
-
-          this.root.appendChild(box);
-          this.selectionBoxes.push(box);
+      const rect = el.getBoundingClientRect();
+      if (!Number.isFinite(rect.left) || rect.width <= 0 || rect.height <= 0) {
+        continue;
       }
+
+      const box = document.createElement("div");
+      box.className = "grabr-selected";
+      box.style.left = `${rect.left}px`;
+      box.style.top = `${rect.top}px`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
+
+      this.root.appendChild(box);
+      this.selectionBoxes.push(box);
+    }
   }
 }
 
-export function createAiGrabClient(partialConfig?: Partial<AiGrabRuntimeConfig>): AiGrabClient {
+export function createGrabrClient(partialConfig?: Partial<GrabrRuntimeConfig>): GrabrClient {
   if (typeof window === "undefined" || typeof document === "undefined") {
-      throw new Error("createAiGrabClient must be called in a browser environment.");
+    throw new Error("createGrabrClient must be called in a browser environment.");
   }
 
   const config = mergeRuntimeConfig(partialConfig);
   validateRuntimeConfigOrThrow(config);
 
-  const inspector = createInspectorEngine(config);
-  const provider = new ClipboardAgentProvider();
-  const controller = new AiGrabController(inspector, provider, config);
+  const controller = new GrabrController(
+    createInspectorEngine(config),
+    new ClipboardAgentProvider(),
+    config
+  );
   const overlay = new SelectionOverlay(controller);
   controller.attachOverlay(overlay);
 
   return {
-      version: controller.version,
-      config: controller.config,
-      startSelectionSession(userInstruction?: string | null): void {
-          controller.startSelectionSession(userInstruction ?? null);
-      },
-      getCurrentSession(): AiGrabSession | null {
-          return controller.getCurrentSession();
-      },
-      registerAgentProvider(providerToAdd: AgentProvider): void {
-          controller.registerAgentProvider(providerToAdd);
-      },
-      setActiveAgentProvider(id: string): void {
-          controller.setActiveAgentProvider(id);
-      },
-      dispose(): void {
-          controller.dispose();
-      },
+    version: controller.version,
+    config: controller.config,
+    startSelectionSession(userInstruction?: string | null): void {
+      controller.startSelectionSession(userInstruction ?? null);
+    },
+    getCurrentSession(): GrabrSession | null {
+      return controller.getCurrentSession();
+    },
+    registerAgentProvider(providerToAdd: AgentProvider): void {
+      controller.registerAgentProvider(providerToAdd);
+    },
+    setActiveAgentProvider(id: string): void {
+      controller.setActiveAgentProvider(id);
+    },
+    dispose(): void {
+      controller.dispose();
+    },
   };
 }
 
-export function initAiGrab(partialConfig?: Partial<AiGrabRuntimeConfig>): AiGrabClient {
-  const client = createAiGrabClient(partialConfig);
-  if (typeof window !== "undefined") {
-      window.aiGrab = {
-          version: client.version,
-          startSelectionSession: client.startSelectionSession.bind(client),
-          getCurrentSession: client.getCurrentSession.bind(client),
-          registerAgentProvider: client.registerAgentProvider.bind(client),
-          setActiveAgentProvider: client.setActiveAgentProvider.bind(client),
-      };
-  }
+export function initGrabr(partialConfig?: Partial<GrabrRuntimeConfig>): GrabrClient {
+  const client = createGrabrClient(partialConfig);
+  window.grabr = {
+    version: client.version,
+    startSelectionSession: client.startSelectionSession.bind(client),
+    getCurrentSession: client.getCurrentSession.bind(client),
+    registerAgentProvider: client.registerAgentProvider.bind(client),
+    setActiveAgentProvider: client.setActiveAgentProvider.bind(client),
+  };
   return client;
 }
 
@@ -2933,20 +2946,20 @@ export function initAiGrab(partialConfig?: Partial<AiGrabRuntimeConfig>): AiGrab
 // -----------------------------------------------------------------------------
 
 /**
- * startAiGrabDemoServer
+ * startGrabrDemoServer
  *
  * A small Bun-powered demo server that serves a static HTML page with the
- * bundled aigrab client script. This function is intentionally NOT invoked
+ * bundled grabr client script. This function is intentionally NOT invoked
  * at module load to keep server concerns separate from the browser runtime.
  *
  * Usage:
  *   // demo.ts (Bun entrypoint)
- *   import { startAiGrabDemoServer } from "./aigrab";
- *   startAiGrabDemoServer();
+ *   import { startGrabrDemoServer } from "./grabr";
+ *   startGrabrDemoServer();
  */
-export async function startAiGrabDemoServer(port: number = 3000): Promise<void> {
+export async function startGrabrDemoServer(port: number = 3000): Promise<void> {
   if (typeof Bun === "undefined") {
-    throw new Error("startAiGrabDemoServer can only be used in a Bun runtime.");
+    throw new Error("startGrabrDemoServer can only be used in a Bun runtime.");
   }
 
   const html = `<!doctype html>
@@ -3002,8 +3015,8 @@ export async function startAiGrabDemoServer(port: number = 3000): Promise<void> 
       }
     </style>
     <script type="module">
-      import { initAiGrab } from "/aigrab.js";
-      initAiGrab();
+      import { initGrabr } from "/grabr.js";
+      initGrabr();
     </script>
   </head>
   <body>
@@ -3031,7 +3044,7 @@ export async function startAiGrabDemoServer(port: number = 3000): Promise<void> 
       </div>
       <p style="margin-top:2rem;font-size:0.75rem;color:#64748b;">
         In a real app, mount your React tree here and ensure <code>bippy</code> is imported
-        before React so aigrab can attach to React fibers.
+        before React so grabr can attach to React fibers.
       </p>
     </div>
   </body>
@@ -3048,7 +3061,7 @@ export async function startAiGrabDemoServer(port: number = 3000): Promise<void> 
   });
 
   if (!buildResult.success || buildResult.outputs.length === 0) {
-    throw new Error("Failed to build aigrab client bundle for demo.");
+    throw new Error("Failed to build grabr client bundle for demo.");
   }
 
   const clientBundle =
@@ -3060,7 +3073,7 @@ export async function startAiGrabDemoServer(port: number = 3000): Promise<void> 
     port,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
-      if (url.pathname === "/aigrab.js") {
+      if (url.pathname === "/grabr.js") {
         return new Response(clientBundle, {
           headers: {
             "Content-Type": "application/javascript; charset=utf-8",
@@ -3076,5 +3089,5 @@ export async function startAiGrabDemoServer(port: number = 3000): Promise<void> 
   });
 
   // eslint-disable-next-line no-console
-  console.log(`[aigrab] Demo server listening on ${server.url}`);
+  console.log(`[grabr] Demo server listening on ${server.url}`);
 }
