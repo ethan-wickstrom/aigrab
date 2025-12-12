@@ -1,6 +1,6 @@
 {
   "name": "aigrab",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Ethan Wickstrom",
   "description": "React element context extraction for AI coding agents.",
   "license": "MIT",
@@ -21,7 +21,11 @@
       "default": "./dist/aigrab.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
   "keywords": [
     "ai",
