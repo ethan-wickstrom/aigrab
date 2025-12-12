@@ -522,15 +522,15 @@ const genericFrameworkStrategy: FrameworkDetectionStrategy = {
 const basicDataSourceStrategy: DataSourceDetectionStrategy = {
   id: "basic-data-props",
   detect(input: DataSourceDetectionInput): readonly DataSourceHint[] {
-    const propNames: string[] =
-      input.ownerProps?.highlighted.map((h) => h.name) ?? [];
-    const lowerNames = propNames.map((p) => p.toLowerCase());
+    const lowerNames: string[] =
+      input.ownerProps?.highlighted.map((h) => h.name.toLowerCase()) ?? [];
+    const lowerSet = new Set(lowerNames);
 
     const hints: DataSourceHint[] = [];
-    const hasData = lowerNames.includes("data");
+    const hasData = lowerSet.has("data");
     const hasIsLoading =
-      lowerNames.includes("isloading") || lowerNames.includes("loading");
-    const hasError = lowerNames.includes("error");
+      lowerSet.has("isloading") || lowerSet.has("loading");
+    const hasError = lowerSet.has("error");
     if (hasData && hasIsLoading && hasError) {
       hints.push({
         kind: "react-query",
@@ -892,14 +892,19 @@ function classifyPropHighlight(
   return "other";
 }
 
+const EXACT_EVENT_KIND: Record<string, EventKind> = {
+  onclick: "click",
+  onchange: "change",
+  onsubmit: "submit",
+  oninput: "input",
+  onfocus: "focus",
+  onblur: "blur",
+};
+
 function inferEventKindFromPropName(name: string): EventKind {
   const lower = name.toLowerCase();
-  if (lower === "onclick") return "click";
-  if (lower === "onchange") return "change";
-  if (lower === "onsubmit") return "submit";
-  if (lower === "oninput") return "input";
-  if (lower === "onfocus") return "focus";
-  if (lower === "onblur") return "blur";
+  const exact = EXACT_EVENT_KIND[lower];
+  if (exact) return exact;
   if (lower.startsWith("onkey")) return "key";
   if (lower.startsWith("onpointer") || lower.startsWith("onmouse")) {
     return "pointer";
@@ -929,10 +934,8 @@ function detectReactBuildTypeSafe(): ReactBuildType {
 }
 
 function getAnyRenderer(): ReactRenderer | null {
-  for (const renderer of _renderers) {
-    return renderer;
-  }
-  return null;
+  const first = _renderers.values().next();
+  return first.done ? null : first.value;
 }
 
 function getReactDebugInfoForElement(element: Element): ReactDebugInfo {
@@ -1096,6 +1099,15 @@ async function buildReactTreeSlice(
   };
 }
 
+const MAX_REACT_SNAPSHOT_ENTRIES = 12;
+
+function limitEntries<T>(
+  entries: readonly T[],
+  limit: number
+): readonly T[] {
+  return entries.length > limit ? entries.slice(0, limit) : entries;
+}
+
 function snapshotProps(fiber: Fiber): PropsSnapshot {
   const highlighted: PropHighlight[] = [];
   let totalProps = 0;
@@ -1111,11 +1123,9 @@ function snapshotProps(fiber: Fiber): PropsSnapshot {
       });
     }
   });
-  const limitedHighlighted =
-    highlighted.length > 12 ? highlighted.slice(0, 12) : highlighted;
   return {
     totalProps,
-    highlighted: limitedHighlighted,
+    highlighted: limitEntries(highlighted, MAX_REACT_SNAPSHOT_ENTRIES),
   };
 }
 
@@ -1132,7 +1142,7 @@ function snapshotState(fiber: Fiber): StateSnapshot {
   });
   return {
     totalHooks: index,
-    entries: entries.length > 12 ? entries.slice(0, 12) : entries,
+    entries: limitEntries(entries, MAX_REACT_SNAPSHOT_ENTRIES),
   };
 }
 
@@ -1149,7 +1159,7 @@ function snapshotContexts(fiber: Fiber): ContextSnapshot {
   });
   return {
     totalContexts: index,
-    entries: entries.length > 12 ? entries.slice(0, 12) : entries,
+    entries: limitEntries(entries, MAX_REACT_SNAPSHOT_ENTRIES),
   };
 }
 
@@ -1231,26 +1241,21 @@ function buildBehaviorContext(
 // App context: URL, routing, data sources
 // -----------------------------------------------------------------------------
 
+function getWindowLocationSafe(): Location | null {
+  if (typeof window === "undefined") return null;
+  const loc = window.location;
+  return typeof loc !== "undefined" ? loc : null;
+}
+
 function buildAppContext(
   reactSlice: ReactTreeSlice | null,
   config: GrabrRuntimeConfig
 ): AppContext {
-  const url =
-    typeof window !== "undefined" && typeof window.location !== "undefined"
-      ? window.location.href
-      : "";
-  const pathname =
-    typeof window !== "undefined" && typeof window.location !== "undefined"
-      ? window.location.pathname
-      : "";
-  const search =
-    typeof window !== "undefined" && typeof window.location !== "undefined"
-      ? window.location.search
-      : "";
-  const hash =
-    typeof window !== "undefined" && typeof window.location !== "undefined"
-      ? window.location.hash
-      : "";
+  const loc = getWindowLocationSafe();
+  const url = loc?.href ?? "";
+  const pathname = loc?.pathname ?? "";
+  const search = loc?.search ?? "";
+  const hash = loc?.hash ?? "";
 
   const frameworkResult =
     config.heuristics.frameworkStrategies
@@ -1307,6 +1312,22 @@ function buildAppContext(
 // Styling / layout frame
 // -----------------------------------------------------------------------------
 
+const BOX_SIDES = ["Top", "Right", "Bottom", "Left"] as const;
+
+function buildBoxShorthand(
+  get: (prop: keyof CSSStyleDeclaration) => string | null,
+  base: "margin" | "padding"
+): string | null {
+  const values = BOX_SIDES.map((side) =>
+    get(`${base}${side}` as keyof CSSStyleDeclaration)
+  );
+  if (values.every((v) => v === null)) {
+    return null;
+  }
+  const [top, right, bottom, left] = values;
+  return `${top ?? "0"} ${right ?? "0"} ${bottom ?? "0"} ${left ?? "0"}`;
+}
+
 function buildStyleFrame(el: Element): StyleFrame {
   const rect = el.getBoundingClientRect();
   const computed =
@@ -1345,26 +1366,8 @@ function buildStyleFrame(el: Element): StyleFrame {
       gridTemplateRows: get("gridTemplateRows"),
     },
     spacing: {
-      margin: (() => {
-        const top = get("marginTop");
-        const right = get("marginRight");
-        const bottom = get("marginBottom");
-        const left = get("marginLeft");
-        if (!top && !right && !bottom && !left) {
-          return null;
-        }
-        return `${top ?? "0"} ${right ?? "0"} ${bottom ?? "0"} ${left ?? "0"}`;
-      })(),
-      padding: (() => {
-        const top = get("paddingTop");
-        const right = get("paddingRight");
-        const bottom = get("paddingBottom");
-        const left = get("paddingLeft");
-        if (!top && !right && !bottom && !left) {
-          return null;
-        }
-        return `${top ?? "0"} ${right ?? "0"} ${bottom ?? "0"} ${left ?? "0"}`;
-      })(),
+      margin: buildBoxShorthand(get, "margin"),
+      padding: buildBoxShorthand(get, "padding"),
     },
     size: {
       width: rect.width > 0 ? `${Math.round(rect.width)}px` : null,
