@@ -3,8 +3,8 @@
 /**
  * grabr: React element context extraction for AI coding agents.
  *
- * Import "bippy" before React runs to enable React metadata. If the hook isn't
- * active, React info will be missing but DOM/styling still works.
+ * Import the grabr client entrypoint before React runs to enable React metadata.
+ * If the hook isn't active, React info will be missing but DOM/styling still works.
  */
 
 // -----------------------------------------------------------------------------
@@ -370,6 +370,14 @@ export interface GrabrApi {
 export interface GrabrClient extends GrabrApi {
   readonly config: Readonly<GrabrRuntimeConfig>;
   dispose(): void;
+}
+
+export interface GrabrInitOptions {
+  readonly config?: Partial<GrabrRuntimeConfig>;
+  readonly providers?: readonly AgentProvider[];
+  readonly activeProviderId?: string;
+  readonly attachToWindow?: boolean;
+  readonly hotkey?: string | false;
 }
 
 // -----------------------------------------------------------------------------
@@ -935,7 +943,7 @@ function getReactDebugInfoForElement(element: Element): ReactDebugInfo {
       buildType,
       inspectorStatus: "no-hook",
       message:
-        "React DevTools hook is not installed. Import 'bippy' before React to enable React metadata.",
+        'React DevTools hook not detected. Import "@ethan-wickstrom/grabr/client" before React renders to enable React metadata.',
     };
   }
 
@@ -944,7 +952,7 @@ function getReactDebugInfoForElement(element: Element): ReactDebugInfo {
       buildType,
       inspectorStatus: "inactive",
       message:
-        "React instrumentation is not active yet. Ensure 'bippy' is imported before React renders.",
+        'React instrumentation is not active yet. Ensure "@ethan-wickstrom/grabr/client" is imported before React renders.',
     };
   }
 
@@ -2419,8 +2427,56 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
   return results;
 }
 
+type HotkeySpec = {
+  readonly alt: boolean;
+  readonly shift: boolean;
+  readonly ctrl: boolean;
+  readonly meta: boolean;
+  readonly key?: string;
+  readonly code?: string;
+};
+
+const DEFAULT_HOTKEY = "Alt+Shift+G";
+
+function parseHotkey(spec: string): HotkeySpec | null {
+  const parts = spec
+    .split("+")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+
+  const last = parts[parts.length - 1]!;
+  const mods = new Set(parts.slice(0, -1).map((p) => p.toLowerCase()));
+
+  const code = /^Key[A-Z]$/i.test(last) || /^Digit\d$/i.test(last) ? last : undefined;
+  const key = code ? undefined : last.toLowerCase();
+
+  return {
+    alt: mods.has("alt") || mods.has("option"),
+    shift: mods.has("shift"),
+    ctrl: mods.has("ctrl") || mods.has("control"),
+    meta: mods.has("meta") || mods.has("cmd") || mods.has("command"),
+    key,
+    code,
+  };
+}
+
+function matchesHotkey(event: KeyboardEvent, spec: HotkeySpec): boolean {
+  if (
+    event.altKey !== spec.alt ||
+    event.shiftKey !== spec.shift ||
+    event.ctrlKey !== spec.ctrl ||
+    event.metaKey !== spec.meta
+  ) {
+    return false;
+  }
+  if (spec.code) return event.code === spec.code;
+  return event.key.toLowerCase() === spec.key;
+}
+
 class SelectionOverlay {
   private readonly controller: GrabrController;
+  private readonly hotkey: HotkeySpec | null;
 
   private readonly root: HTMLDivElement;
   private readonly highlight: HTMLDivElement;
@@ -2447,8 +2503,9 @@ class SelectionOverlay {
 
   private toastTimer: number | null = null;
 
-  constructor(controller: GrabrController) {
+  constructor(controller: GrabrController, hotkey: HotkeySpec | null) {
     this.controller = controller;
+    this.hotkey = hotkey;
 
     injectGrabrStyles();
 
@@ -2509,7 +2566,9 @@ class SelectionOverlay {
 
     document.documentElement.appendChild(this.root);
 
-    this.registerGlobalToggleShortcut();
+    if (this.hotkey) {
+      this.registerGlobalToggleShortcut();
+    }
   }
 
   beginSelection(): void {
@@ -2558,20 +2617,17 @@ class SelectionOverlay {
   }
 
   private registerGlobalToggleShortcut(): void {
+    const hotkey = this.hotkey;
+    if (!hotkey) return;
     document.addEventListener(
       "keydown",
       (event: KeyboardEvent) => {
-        if (
-          event.altKey &&
-          event.shiftKey &&
-          (event.key.toLowerCase() === "g" || event.code === "KeyG")
-        ) {
-          event.preventDefault();
-          if (this.selecting || this.sending) {
-            this.cancelSelection();
-          } else {
-            this.beginSelection();
-          }
+        if (!matchesHotkey(event, hotkey)) return;
+        event.preventDefault();
+        if (this.selecting || this.sending) {
+          this.cancelSelection();
+        } else {
+          this.beginSelection();
         }
       },
       false
@@ -2892,23 +2948,89 @@ class SelectionOverlay {
   }
 }
 
-export function createGrabrClient(partialConfig?: Partial<GrabrRuntimeConfig>): GrabrClient {
+let didWarnMissingHook = false;
+
+function isInitOptionsArg(
+  arg: Partial<GrabrRuntimeConfig> | GrabrInitOptions
+): arg is GrabrInitOptions {
+  return (
+    "config" in arg ||
+    "providers" in arg ||
+    "activeProviderId" in arg ||
+    "attachToWindow" in arg ||
+    "hotkey" in arg
+  );
+}
+
+function normalizeInitOptionsArg(
+  arg?: Partial<GrabrRuntimeConfig> | GrabrInitOptions
+): GrabrInitOptions {
+  if (!arg) return {};
+  if (isInitOptionsArg(arg)) return arg;
+  return { config: arg };
+}
+
+function warnIfMissingReactHook(config: GrabrRuntimeConfig): void {
+  if (didWarnMissingHook) return;
+  if (config.reactInspectorMode === "off") return;
+  if (hasRDTHook()) return;
+  didWarnMissingHook = true;
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[grabr] React DevTools hook not detected. Import "@ethan-wickstrom/grabr/client" before React renders to enable React metadata.'
+  );
+}
+
+function attachClientToWindow(client: GrabrClient): void {
+  window.grabr = {
+    version: client.version,
+    startSelectionSession: client.startSelectionSession.bind(client),
+    getCurrentSession: client.getCurrentSession.bind(client),
+    registerAgentProvider: client.registerAgentProvider.bind(client),
+    setActiveAgentProvider: client.setActiveAgentProvider.bind(client),
+  };
+}
+
+export function createGrabrClient(
+  partialConfig?: Partial<GrabrRuntimeConfig>
+): GrabrClient;
+export function createGrabrClient(options?: GrabrInitOptions): GrabrClient;
+export function createGrabrClient(
+  arg?: Partial<GrabrRuntimeConfig> | GrabrInitOptions
+): GrabrClient {
   if (typeof window === "undefined" || typeof document === "undefined") {
     throw new Error("createGrabrClient must be called in a browser environment.");
   }
 
-  const config = mergeRuntimeConfig(partialConfig);
+  const options = normalizeInitOptionsArg(arg);
+  const config = mergeRuntimeConfig(options.config);
   validateRuntimeConfigOrThrow(config);
+  warnIfMissingReactHook(config);
 
+  const providers =
+    options.providers && options.providers.length > 0
+      ? [...options.providers]
+      : [new ClipboardAgentProvider()];
   const controller = new GrabrController(
     createInspectorEngine(config),
-    new ClipboardAgentProvider(),
+    providers[0]!,
     config
   );
-  const overlay = new SelectionOverlay(controller);
+  for (const provider of providers.slice(1)) {
+    controller.registerAgentProvider(provider);
+  }
+  if (options.activeProviderId) {
+    controller.setActiveAgentProvider(options.activeProviderId);
+  }
+
+  const hotkey =
+    options.hotkey === false
+      ? null
+      : parseHotkey(options.hotkey ?? DEFAULT_HOTKEY);
+  const overlay = new SelectionOverlay(controller, hotkey);
   controller.attachOverlay(overlay);
 
-  return {
+  const client: GrabrClient = {
     version: controller.version,
     config: controller.config,
     startSelectionSession(userInstruction?: string | null): void {
@@ -2927,18 +3049,23 @@ export function createGrabrClient(partialConfig?: Partial<GrabrRuntimeConfig>): 
       controller.dispose();
     },
   };
+
+  if (options.attachToWindow) {
+    attachClientToWindow(client);
+  }
+
+  return client;
 }
 
-export function initGrabr(partialConfig?: Partial<GrabrRuntimeConfig>): GrabrClient {
-  const client = createGrabrClient(partialConfig);
-  window.grabr = {
-    version: client.version,
-    startSelectionSession: client.startSelectionSession.bind(client),
-    getCurrentSession: client.getCurrentSession.bind(client),
-    registerAgentProvider: client.registerAgentProvider.bind(client),
-    setActiveAgentProvider: client.setActiveAgentProvider.bind(client),
-  };
-  return client;
+export function initGrabr(
+  partialConfig?: Partial<GrabrRuntimeConfig>
+): GrabrClient;
+export function initGrabr(options?: GrabrInitOptions): GrabrClient;
+export function initGrabr(
+  arg?: Partial<GrabrRuntimeConfig> | GrabrInitOptions
+): GrabrClient {
+  const options = normalizeInitOptionsArg(arg);
+  return createGrabrClient({ ...options, attachToWindow: true });
 }
 
 // -----------------------------------------------------------------------------
@@ -3043,9 +3170,9 @@ export async function startGrabrDemoServer(port: number = 3000): Promise<void> {
         </div>
       </div>
       <p style="margin-top:2rem;font-size:0.75rem;color:#64748b;">
-        In a real app, mount your React tree here and ensure <code>bippy</code> is imported
-        before React so grabr can attach to React fibers.
-      </p>
+	        In a real app, mount your React tree here and ensure the grabr client is imported
+	        before React so grabr can attach to React fibers.
+	      </p>
     </div>
   </body>
 </html>`;

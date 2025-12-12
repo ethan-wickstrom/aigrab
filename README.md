@@ -8,17 +8,16 @@ React element context extraction for AI coding agents.
 bun add @ethan-wickstrom/grabr
 ```
 
-## Usage (browser app)
+## Quick start (React app)
 
-`grabr` can extract DOM + (optionally) React component context for a clicked element.
+`grabr` extracts DOM + (optionally) React component context for clicked elements.
 
-**Important:** install the React DevTools hook via `bippy` *before React runs*.
+**Important:** import `@ethan-wickstrom/grabr/client` as early as possible in your client bundle, before React renders.
 
 ```ts
-import "bippy"; // installs DevTools hook before React
-import { initGrabr } from "@ethan-wickstrom/grabr";
+import { setupGrabr } from "@ethan-wickstrom/grabr/client";
 
-initGrabr(); // attaches overlay + sets window.grabr
+setupGrabr(); // installs overlay + sets window.grabr
 ```
 
 Then start a selection session from the console:
@@ -26,6 +25,21 @@ Then start a selection session from the console:
 ```js
 window.grabr?.startSelectionSession("Update the button styles.");
 ```
+
+## Configuration
+
+```ts
+setupGrabr({
+  config: {
+    reactInspectorMode: "best-effort",
+    maxReactStackFrames: 8,
+  },
+  // "Alt+Shift+G" by default. Set to false to disable the global toggle.
+  hotkey: "Alt+Shift+G",
+});
+```
+
+If you don't want a global, use `createGrabrClient({ attachToWindow: false })` from the same entrypoint.
 
 ## Local dev
 
