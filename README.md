@@ -55,6 +55,16 @@ To run the Bun demo server:
 bun run demo
 ```
 
+You can also start the demo server directly in a Bun script to explore the internal client bundle and the enhanced React metadata capture flow:
+
+```ts
+import { startGrabrDemoServer } from "@ethan-wickstrom/grabr/grabr";
+
+await startGrabrDemoServer(3000);
+// Visit http://localhost:3000 and press Alt+Shift+G to toggle selection.
+// React component stacks, props, context, and DOM styling are captured for the clicked element.
+```
+
 ## Build (for publishing)
 
 ```bash

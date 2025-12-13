@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/ethan-wickstrom/grabr/compare/v1.1.0...v1.2.0) (2025-12-12)
+
+
+### Features
+
+* **grabr:** introduce internal client and demo server, enhance context extraction and metadata handling for React integration ([1f74380](https://github.com/ethan-wickstrom/grabr/commit/1f74380dae1b356b671c5b4b69cf2188f85bd779))
+
 ## [1.1.0](https://github.com/ethan-wickstrom/grabr/compare/v1.0.0...v1.1.0) (2025-12-12)
 
 
